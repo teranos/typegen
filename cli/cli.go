@@ -21,7 +21,6 @@ import (
 // Each language can have a different set of packages to generate types from
 var languagePackages = map[string][]string{
 	"typescript": {
-		"github.com/teranos/QNTX/ats/types",
 		"github.com/teranos/QNTX/pulse/async",
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",
@@ -30,7 +29,6 @@ var languagePackages = map[string][]string{
 		"github.com/teranos/QNTX/sym",
 	},
 	"rust": {
-		"github.com/teranos/QNTX/ats/types",
 		"github.com/teranos/QNTX/pulse/async",
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",
@@ -42,7 +40,6 @@ var languagePackages = map[string][]string{
 		"github.com/teranos/QNTX/sym",
 	},
 	"python": {
-		"github.com/teranos/QNTX/ats/types",
 		"github.com/teranos/QNTX/pulse/async",
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",
@@ -50,7 +47,6 @@ var languagePackages = map[string][]string{
 		"github.com/teranos/QNTX/sym",
 	},
 	"markdown": {
-		"github.com/teranos/QNTX/ats/types",
 		"github.com/teranos/QNTX/pulse/async",
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",
@@ -73,7 +69,18 @@ var (
 	typegenOutput   string
 	typegenPackages []string
 	typegenLang     string
+	typegenIndex    bool
 )
+
+// resolvePackages returns the packages to generate for a language: the
+// caller-specified --packages when set, otherwise the language defaults.
+func resolvePackages(lang string) []string {
+	if len(typegenPackages) == 0 {
+		return getDefaultPackages(lang)
+	}
+	// Expand short package names to full import paths
+	return normalizePackagePaths(typegenPackages)
+}
 
 // TypegenCmd represents the typegen command
 var TypegenCmd = &cobra.Command{
@@ -105,8 +112,11 @@ Examples:
 
 func init() {
 	TypegenCmd.Flags().StringVarP(&typegenOutput, "output", "o", "", "Output directory (default: stdout)")
-	TypegenCmd.Flags().StringSliceVarP(&typegenPackages, "packages", "p", nil, "Packages to process (default: ats/types, pulse/async, server)")
 	TypegenCmd.Flags().StringVarP(&typegenLang, "lang", "l", "typescript", "Target language: typescript, python, rust, css, markdown, all")
+
+	// Persistent so the check subcommand resolves packages the same way
+	TypegenCmd.PersistentFlags().StringSliceVarP(&typegenPackages, "packages", "p", nil, "Packages to process (default: the language's package list)")
+	TypegenCmd.PersistentFlags().BoolVar(&typegenIndex, "index", true, "Generate index/barrel files (index.ts, mod.rs, README.md)")
 
 	// Add check subcommand
 	TypegenCmd.AddCommand(TypegenCheckCmd)
@@ -151,8 +161,7 @@ func runTypegenCheck(cmd *cobra.Command, args []string) error {
 	languages := []string{"typescript", "python", "rust", "css", "markdown"}
 
 	for _, lang := range languages {
-		packages := getDefaultPackages(lang)
-		if err := generateForLanguage(lang, packages, true); err != nil {
+		if err := generateForLanguage(lang, resolvePackages(lang), typegenIndex); err != nil {
 			return errors.Wrapf(err, "failed to generate %s types", lang)
 		}
 	}
@@ -191,17 +200,7 @@ func runTypegen(cmd *cobra.Command, args []string) error {
 
 	// Generate for each language
 	for _, lang := range languages {
-		// Use custom packages if provided, otherwise use language-specific defaults
-		packages := typegenPackages
-		usingDefaultPackages := len(packages) == 0
-		if usingDefaultPackages {
-			packages = getDefaultPackages(lang)
-		} else {
-			// Expand short package names to full import paths
-			packages = normalizePackagePaths(packages)
-		}
-
-		if err := generateForLanguage(lang, packages, usingDefaultPackages); err != nil {
+		if err := generateForLanguage(lang, resolvePackages(lang), typegenIndex); err != nil {
 			return errors.Wrapf(err, "failed to generate %s types", lang)
 		}
 	}
@@ -310,7 +309,7 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 	}
 
 	// Generate index file for TypeScript (barrel export)
-	// Only generate when processing all default packages to avoid partial indices
+	// Controlled by --index; the index covers exactly the packages that were generated
 	if outputDir != "" && lang == "typescript" && generateIndex {
 		exports := convertToPackageExports(results)
 		if err := typescript.GenerateIndexFile(outputDir, exports); err != nil {
@@ -319,7 +318,7 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 	}
 
 	// Generate mod.rs index for Rust
-	// Only generate when processing all default packages to avoid partial indices
+	// Controlled by --index; the index covers exactly the packages that were generated
 	// Skip scaffolding files (lib.rs, Cargo.toml, README.md, mod.rs) for embedded locations
 	if outputDir != "" && lang == "rust" && generateIndex {
 		exports := convertToRustPackageExports(results)
@@ -344,7 +343,7 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 	}
 
 	// Generate README.md for CSS
-	// Only generate when processing all default packages to avoid partial indices
+	// Controlled by --index; the index covers exactly the packages that were generated
 	if outputDir != "" && lang == "css" && generateIndex {
 		if err := css.GenerateReadme(outputDir); err != nil {
 			return fmt.Errorf("failed to generate CSS README: %w", err)
@@ -353,7 +352,7 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 	}
 
 	// Generate README.md index for markdown documentation
-	// Only generate when processing all default packages to avoid partial indices
+	// Controlled by --index; the index covers exactly the packages that were generated
 	if outputDir != "" && lang == "markdown" && generateIndex {
 		readme := generateMarkdownIndex(results)
 		readmePath := filepath.Join(outputDir, "README.md")
