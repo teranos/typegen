@@ -18,6 +18,10 @@ import (
 // Each language can have a different set of packages to generate types from
 var languagePackages = map[string][]string{
 	"typescript": {
+		// Still needed: the server package embeds *types.As, so dropping this
+		// leaves server.ts referencing As with nothing to import it from.
+		// Goes away when those fields move to proto's Attestation (ADR-006).
+		"github.com/teranos/QNTX/ats/types",
 		"github.com/teranos/QNTX/pulse/async",
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",

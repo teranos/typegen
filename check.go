@@ -18,10 +18,13 @@ type CheckResult struct {
 // CompareDirectories compares generated types in tempDir with existing types.
 // Returns a CheckResult indicating which files differ.
 //
-// Directory structure expected:
+// The subdirectories are the ones getOutputConfig writes to under an
+// --output root, not the language names: markdown lands in docs/types, so
+// looking for tempDir/markdown found nothing and compareDirectory returned
+// no differences for a directory that was never there.
 //
 //	tempDir/typescript/   -> compares with types/generated/typescript/
-//	tempDir/markdown/     -> compares with docs/types/
+//	tempDir/docs/types/   -> compares with docs/types/
 func CompareDirectories(tempDir string) (*CheckResult, error) {
 	differences := make(map[string][]string)
 
@@ -35,7 +38,7 @@ func CompareDirectories(tempDir string) (*CheckResult, error) {
 
 	// Check Markdown
 	if diffs := compareDirectory(
-		filepath.Join(tempDir, "markdown"),
+		filepath.Join(tempDir, "docs", "types"),
 		"docs/types",
 	); len(diffs) > 0 {
 		differences["Markdown"] = diffs
