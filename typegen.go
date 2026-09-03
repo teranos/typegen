@@ -1,8 +1,8 @@
 // Package typegen generates type definitions from Go source code for multiple target languages.
 //
 // This is QNTX's own type generator, designed to work with the attestation
-// type system and maintain consistency between Go and multiple target languages
-// (TypeScript, Python, Rust, Dart).
+// type system and maintain consistency between Go and its target languages
+// (TypeScript, Markdown).
 //
 // # Struct Tag Support
 //

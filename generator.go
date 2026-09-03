@@ -42,7 +42,7 @@ package typegen
 import "go/ast"
 
 // Generator defines the interface for language-specific type generators.
-// Each target language (TypeScript, Python, Rust, Dart) implements this interface.
+// Each target language (TypeScript, Markdown) implements this interface.
 type Generator interface {
 	// GenerateFile creates a complete output file from parsed Go types
 	GenerateFile(result *Result) string

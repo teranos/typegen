@@ -10,10 +10,7 @@ import (
 	"github.com/teranos/errors"
 	"github.com/teranos/typegen"
 	"github.com/teranos/typegen/api"
-	"github.com/teranos/typegen/css"
 	"github.com/teranos/typegen/markdown"
-	"github.com/teranos/typegen/python"
-	"github.com/teranos/typegen/rust"
 	"github.com/teranos/typegen/typescript"
 )
 
@@ -25,24 +22,6 @@ var languagePackages = map[string][]string{
 		"github.com/teranos/QNTX/pulse/budget",
 		"github.com/teranos/QNTX/pulse/schedule",
 		"github.com/teranos/QNTX/server",
-		"github.com/teranos/QNTX/server/syscap", // System capabilities types
-		"github.com/teranos/QNTX/sym",
-	},
-	"rust": {
-		"github.com/teranos/QNTX/pulse/async",
-		"github.com/teranos/QNTX/pulse/budget",
-		"github.com/teranos/QNTX/pulse/schedule",
-		// server package excluded - server-side HTTP handler types
-		"github.com/teranos/QNTX/server/syscap", // System capabilities types
-		"github.com/teranos/QNTX/sym",
-	},
-	"css": {
-		"github.com/teranos/QNTX/sym",
-	},
-	"python": {
-		"github.com/teranos/QNTX/pulse/async",
-		"github.com/teranos/QNTX/pulse/budget",
-		"github.com/teranos/QNTX/pulse/schedule",
 		"github.com/teranos/QNTX/server/syscap", // System capabilities types
 		"github.com/teranos/QNTX/sym",
 	},
@@ -89,15 +68,18 @@ var TypegenCmd = &cobra.Command{
 	Long: `Generate type definitions from Go structs for multiple target languages.
 
 This command parses Go source code and generates corresponding type definitions.
-Supported languages: TypeScript, Python, Rust, Markdown (coming: Dart)
+Supported languages: TypeScript, Markdown (coming: Dart)
+
+The Python, Rust and CSS targets were removed once nothing consumed their
+output; proto is the source of truth for cross-language types (QNTX ADR-006).
 
 It handles:
-  - Struct types → interfaces/classes
-  - Type aliases with consts → union types/enums
+  - Struct types → interfaces
+  - Type aliases with consts → union types
   - JSON tags for field naming
   - Pointer types as optional fields
   - time.Time as string
-  - map[string]interface{} as Record/dict/HashMap
+  - map[string]interface{} as Record
   - API endpoint documentation (generated with markdown to docs/api/)
 
 Examples:
@@ -112,11 +94,11 @@ Examples:
 
 func init() {
 	TypegenCmd.Flags().StringVarP(&typegenOutput, "output", "o", "", "Output directory (default: stdout)")
-	TypegenCmd.Flags().StringVarP(&typegenLang, "lang", "l", "typescript", "Target language: typescript, python, rust, css, markdown, all")
+	TypegenCmd.Flags().StringVarP(&typegenLang, "lang", "l", "typescript", "Target language: typescript, markdown, all")
 
 	// Persistent so the check subcommand resolves packages the same way
 	TypegenCmd.PersistentFlags().StringSliceVarP(&typegenPackages, "packages", "p", nil, "Packages to process (default: the language's package list)")
-	TypegenCmd.PersistentFlags().BoolVar(&typegenIndex, "index", true, "Generate index/barrel files (index.ts, mod.rs, README.md)")
+	TypegenCmd.PersistentFlags().BoolVar(&typegenIndex, "index", true, "Generate index/barrel files (index.ts, README.md)")
 
 	// Add check subcommand
 	TypegenCmd.AddCommand(TypegenCheckCmd)
@@ -158,7 +140,7 @@ func runTypegenCheck(cmd *cobra.Command, args []string) error {
 	defer func() { typegenOutput = originalOutput }()
 
 	// Generate all types to temp directory
-	languages := []string{"typescript", "python", "rust", "css", "markdown"}
+	languages := []string{"typescript", "markdown"}
 
 	for _, lang := range languages {
 		if err := generateForLanguage(lang, resolvePackages(lang), typegenIndex); err != nil {
@@ -214,17 +196,11 @@ func getLanguages(lang string) []string {
 
 	switch lang {
 	case "all":
-		return []string{"typescript", "python", "rust", "css", "markdown"} // All supported languages
+		return []string{"typescript", "markdown"} // All supported languages
 	case "typescript", "ts":
 		return []string{"typescript"}
-	case "python", "py":
-		return []string{"python"}
 	case "markdown", "md":
 		return []string{"markdown"}
-	case "rust", "rs":
-		return []string{"rust"}
-	case "css":
-		return []string{"css"}
 	case "dart":
 		return []string{"dart"}
 	default:
@@ -272,17 +248,6 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 		gen = typescript.NewGenerator()
 	case "markdown":
 		gen = markdown.NewGenerator()
-	case "rust":
-		// Use embedded generator if outputting to an embedded module location
-		if isEmbeddedRustLocation(outputDir) {
-			gen = rust.NewEmbeddedGenerator()
-		} else {
-			gen = rust.NewGenerator()
-		}
-	case "python":
-		gen = python.NewGenerator()
-	case "css":
-		gen = css.NewGenerator()
 	case "dart":
 		fmt.Printf("⚠ %s generator not yet implemented (coming in v1.0.0)\n", lang)
 		return nil
@@ -315,40 +280,6 @@ func generateForLanguage(lang string, packages []string, generateIndex bool) err
 		if err := typescript.GenerateIndexFile(outputDir, exports); err != nil {
 			return errors.Wrap(err, "failed to generate index file")
 		}
-	}
-
-	// Generate mod.rs index for Rust
-	// Controlled by --index; the index covers exactly the packages that were generated
-	// Skip scaffolding files (lib.rs, Cargo.toml, README.md, mod.rs) for embedded locations
-	if outputDir != "" && lang == "rust" && generateIndex {
-		exports := convertToRustPackageExports(results)
-		isEmbedded := isEmbeddedRustLocation(outputDir)
-
-		if !isEmbedded {
-			// Standalone crate: generate all scaffolding
-			if err := rust.GenerateIndexFile(outputDir, exports); err != nil {
-				return errors.Wrap(err, "failed to generate mod.rs")
-			}
-			if err := rust.GenerateLibRs(outputDir, exports); err != nil {
-				return errors.Wrap(err, "failed to generate lib.rs")
-			}
-			if err := rust.GenerateCargoToml(outputDir); err != nil {
-				return errors.Wrap(err, "failed to generate Cargo.toml")
-			}
-			if err := rust.GenerateReadme(outputDir, exports); err != nil {
-				return errors.Wrap(err, "failed to generate README.md")
-			}
-		}
-		// Embedded location: skip scaffolding (custom mod.rs exists in parent crate)
-	}
-
-	// Generate README.md for CSS
-	// Controlled by --index; the index covers exactly the packages that were generated
-	if outputDir != "" && lang == "css" && generateIndex {
-		if err := css.GenerateReadme(outputDir); err != nil {
-			return fmt.Errorf("failed to generate CSS README: %w", err)
-		}
-		fmt.Printf("✓ Generated %s (index)\n", filepath.Join(outputDir, "README.md"))
 	}
 
 	// Generate README.md index for markdown documentation
@@ -429,35 +360,20 @@ func addCrossPackageImports(results []genResult, typeToPackage map[string]string
 	}
 }
 
-// isEmbeddedRustLocation returns true if the output directory is an embedded location
-// within an existing Rust crate (not a standalone generated crate)
-func isEmbeddedRustLocation(outputDir string) bool {
-	// Embedded locations are within crates/ and contain /src/
-	return strings.Contains(outputDir, "crates/") && strings.Contains(outputDir, "/src/")
-}
-
 // getOutputConfig determines the output directory and file extension for a language
 func getOutputConfig(lang string) (outputDir, fileExt string) {
 	if typegenOutput == "" {
-		// No output specified: markdown defaults to docs/types, rust to embedded crate, css to web/css/generated, others to stdout
+		// No output specified: markdown defaults to docs/types, others to stdout
 		if lang == "markdown" {
 			outputDir = "docs/types"
-		} else if lang == "rust" {
-			outputDir = "crates/qntx-grpc/src/types"
-		} else if lang == "css" {
-			outputDir = "web/css/generated"
 		} else {
 			outputDir = "" // stdout mode
 		}
 	} else {
 		// Output specified: use it for all languages
-		// For Rust, markdown, and CSS, preserve the actual output structure to ensure correct import generation
-		if lang == "rust" {
-			outputDir = filepath.Join(typegenOutput, "crates/qntx-grpc/src/types")
-		} else if lang == "markdown" {
+		// For markdown, preserve the actual output structure to ensure correct import generation
+		if lang == "markdown" {
 			outputDir = filepath.Join(typegenOutput, "docs/types")
-		} else if lang == "css" {
-			outputDir = filepath.Join(typegenOutput, "web/css/generated")
 		} else {
 			outputDir = filepath.Join(typegenOutput, lang)
 		}
@@ -466,14 +382,8 @@ func getOutputConfig(lang string) (outputDir, fileExt string) {
 	switch lang {
 	case "typescript":
 		fileExt = ".ts"
-	case "python":
-		fileExt = ".py"
 	case "markdown":
 		fileExt = ".md"
-	case "rust":
-		fileExt = ".rs"
-	case "css":
-		fileExt = ".css"
 	case "dart":
 		fileExt = ".dart"
 	}
@@ -503,13 +413,6 @@ func writeGeneratedOutput(results []genResult, outputDir, fileExt, lang string) 
 				return errors.Wrapf(err, "failed to write %s", outputPath)
 			}
 
-			// Format Rust files after writing
-			if lang == "rust" {
-				if err := rust.FormatFile(outputPath); err != nil {
-					return errors.Wrapf(err, "failed to format rust file %s", outputPath)
-				}
-			}
-
 			fmt.Printf("✓ Generated %s (%d types)\n", outputPath, len(res.typeNames))
 		}
 	}
@@ -528,25 +431,12 @@ func convertToPackageExports(results []genResult) []typescript.PackageExport {
 	return exports
 }
 
-// convertToRustPackageExports converts genResults to Rust PackageExports
-func convertToRustPackageExports(results []genResult) []rust.PackageExport {
-	exports := make([]rust.PackageExport, len(results))
-	for i, res := range results {
-		exports[i] = rust.PackageExport{
-			PackageName: res.packageName,
-			TypeNames:   res.typeNames,
-		}
-	}
-	return exports
-}
-
 // generateMarkdownIndex creates a README.md index for the docs/types directory
 func generateMarkdownIndex(results []genResult) string {
 	var sb strings.Builder
 
 	// Package descriptions
 	packageDescriptions := map[string]string{
-		"types":    "Core attestation types (As, AsCommand, AxFilter)",
 		"async":    "Asynchronous job processing with Pulse",
 		"budget":   "Cost tracking and budget management",
 		"schedule": "Scheduled execution with cron",
@@ -562,7 +452,7 @@ func generateMarkdownIndex(results []genResult) string {
 	sb.WriteString("## Packages\n\n")
 
 	// Group packages by category
-	corePackages := []string{"types", "sym"}
+	corePackages := []string{"sym"}
 	pulsePackages := []string{"async", "budget", "schedule"}
 	serverPackages := []string{"server"}
 

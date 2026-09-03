@@ -1,5 +1,5 @@
 {
-  description = "QNTX Type Generator - generates TypeScript, Python, Rust, CSS, and Markdown types";
+  description = "QNTX Type Generator - generates TypeScript and Markdown types";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
